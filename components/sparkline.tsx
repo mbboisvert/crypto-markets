@@ -1,8 +1,9 @@
 type SparklineProps = {
   prices: number[];
+  days: 7 | 30;
 };
 
-export function Sparkline({ prices }: SparklineProps) {
+export function Sparkline({ prices, days }: SparklineProps) {
   if (prices.length < 2) {
     return <span className="spark spark-empty" />;
   }
@@ -29,7 +30,7 @@ export function Sparkline({ prices }: SparklineProps) {
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       role="img"
-      aria-label={up ? "30-day price trend up" : "30-day price trend down"}
+      aria-label={up ? `${days}-day price trend up` : `${days}-day price trend down`}
     >
       <polyline
         fill="none"

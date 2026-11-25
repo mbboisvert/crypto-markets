@@ -14,6 +14,7 @@ export type Coin = {
   volume24h: number;
   marketCap: number;
   sparkline: number[];
+  sparklineDays: 7 | 30;
   links: CoinLink[];
   tvSymbol: string;
 };

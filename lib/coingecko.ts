@@ -17,30 +17,28 @@ type Market = {
   market_cap: number;
   total_volume: number;
   price_change_percentage_24h: number | null;
+  sparkline: number[];
+  sparklineDays: 7 | 30;
 };
 
 export async function getTopMarkets(): Promise<MarketsResult> {
   const data = await getJson(
-    `${API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=10&page=1&sparkline=false&price_change_percentage=24h`,
+    `${API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=10&page=1&sparkline=true&price_change_percentage=24h`,
     6,
   );
   const markets = parseMarkets(data);
   if (!markets) return { ok: false };
 
   const coins = await mapPool(markets, 2, async (market, index) => {
-    const [detail, chart, tvSymbol] = await Promise.all([
+    const [detail, tvSymbol] = await Promise.all([
       getJson(coinUrl(market.id)),
-      getJson(chartUrl(market.id)),
       resolveTradingViewSymbol(market.symbol),
     ]);
 
-    return toCoin(market, index, detail, chart, tvSymbol);
+    return toCoin(market, index, detail, tvSymbol);
   });
 
   for (const coin of coins) {
-    if (coin.sparkline.length < 2) {
-      coin.sparkline = sparklineFrom(await getJson(chartUrl(coin.id)));
-    }
     if (!coin.detailOk) {
       const detail = await getJson(coinUrl(coin.id));
       if (detail) coin.links = linksFrom(detail);
@@ -62,6 +60,7 @@ function publishCoin(draft: DraftCoin): Coin {
     volume24h: draft.volume24h,
     marketCap: draft.marketCap,
     sparkline: draft.sparkline,
+    sparklineDays: draft.sparklineDays,
     links: draft.links,
     tvSymbol: draft.tvSymbol,
   };
@@ -71,17 +70,12 @@ function coinUrl(id: string): string {
   return `${API}/coins/${encodeURIComponent(id)}?localization=false&tickers=false&market_data=false&community_data=false&developer_data=false&sparkline=false`;
 }
 
-function chartUrl(id: string): string {
-  return `${API}/coins/${encodeURIComponent(id)}/market_chart?vs_currency=usd&days=30&interval=daily`;
-}
-
 type DraftCoin = Coin & { detailOk: boolean };
 
 function toCoin(
   market: Market,
   index: number,
   detail: unknown,
-  chart: unknown,
   tvSymbol: string,
 ): DraftCoin {
   return {
@@ -94,7 +88,8 @@ function toCoin(
     change24h: market.price_change_percentage_24h,
     volume24h: market.total_volume,
     marketCap: market.market_cap,
-    sparkline: sparklineFrom(chart),
+    sparkline: market.sparkline,
+    sparklineDays: market.sparklineDays,
     links: linksFrom(detail),
     tvSymbol,
     detailOk: detail != null,
@@ -121,6 +116,7 @@ function parseMarkets(data: unknown): Market[] | null {
       continue;
     }
     const change = record.price_change_percentage_24h;
+    const sparkline = sparklineFromMarket(record);
     markets.push({
       id: record.id,
       symbol: record.symbol,
@@ -131,6 +127,8 @@ function parseMarkets(data: unknown): Market[] | null {
       total_volume: record.total_volume,
       price_change_percentage_24h:
         typeof change === "number" && Number.isFinite(change) ? change : null,
+      sparkline: sparkline.prices,
+      sparklineDays: sparkline.days,
     });
     if (markets.length === 10) break;
   }
@@ -165,17 +163,45 @@ function linksFrom(detail: unknown): CoinLink[] {
   return result;
 }
 
-function sparklineFrom(chart: unknown): number[] {
-  if (!chart || typeof chart !== "object") return [];
-  const prices = (chart as { prices?: unknown }).prices;
-  if (!Array.isArray(prices)) return [];
-  const values: number[] = [];
-  for (const point of prices) {
-    if (!Array.isArray(point)) continue;
-    const value = point[1];
-    if (typeof value === "number" && Number.isFinite(value)) values.push(value);
+function sparklineFromMarket(record: Record<string, unknown>): {
+  prices: number[];
+  days: 7 | 30;
+} {
+  for (const key of Object.keys(record)) {
+    if (!/sparkline/i.test(key) || !/30/.test(key)) continue;
+    const prices = pricesFrom(record[key]);
+    if (prices.length >= 2) return { prices: downsample(prices, 40), days: 30 };
   }
-  return downsample(values, 40);
+  for (const key of Object.keys(record)) {
+    if (!/sparkline/i.test(key)) continue;
+    const prices = pricesFrom(record[key]);
+    if (prices.length >= 2) return { prices: downsample(prices, 40), days: 7 };
+  }
+  return { prices: [], days: 7 };
+}
+
+function pricesFrom(value: unknown): number[] {
+  if (Array.isArray(value)) return numericPrices(value);
+  if (!value || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  if ("price" in record) return numericPrices(record.price);
+  if ("prices" in record) return numericPrices(record.prices);
+  return [];
+}
+
+function numericPrices(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  const prices: number[] = [];
+  for (const point of value) {
+    if (typeof point === "number" && Number.isFinite(point)) {
+      prices.push(point);
+      continue;
+    }
+    if (!Array.isArray(point)) continue;
+    const candidate = point.length > 1 ? point[1] : point[0];
+    if (typeof candidate === "number" && Number.isFinite(candidate)) prices.push(candidate);
+  }
+  return prices;
 }
 
 function downsample(values: number[], max: number): number[] {

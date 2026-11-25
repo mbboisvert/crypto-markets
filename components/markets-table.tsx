@@ -8,6 +8,10 @@ import type { Coin } from "@/lib/types";
 
 export function MarketsTable({ coins }: { coins: Coin[] }) {
   const [openId, setOpenId] = useState<string | null>(null);
+  const sparklineDays = coins[0]?.sparklineDays ?? 7;
+  const sparklineHeading = coins.every((coin) => coin.sparklineDays === sparklineDays)
+    ? `${sparklineDays} Days`
+    : "Trend";
 
   function toggle(id: string) {
     setOpenId((current) => (current === id ? null : id));
@@ -33,7 +37,7 @@ export function MarketsTable({ coins }: { coins: Coin[] }) {
               Market Cap
             </th>
             <th scope="col" className="num">
-              30 Days
+              {sparklineHeading}
             </th>
           </tr>
         </thead>
@@ -82,7 +86,7 @@ export function MarketsTable({ coins }: { coins: Coin[] }) {
                   <td className="num">{formatCompactUsd(coin.volume24h)}</td>
                   <td className="num">{formatCompactUsd(coin.marketCap)}</td>
                   <td className="num spark-cell">
-                    <Sparkline prices={coin.sparkline} />
+                    <Sparkline prices={coin.sparkline} days={coin.sparklineDays} />
                   </td>
                 </tr>
                 {open ? (
